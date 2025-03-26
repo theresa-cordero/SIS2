@@ -418,6 +418,7 @@ subroutine direct_flux_ice_to_IOB(Time, Ice, IOB, do_thermo, do_dynmer, IceMerge
     js = IceMerged%sG%jsc ; je = IceMerged%sG%jec 
 
     !if (ASSOCIATED(IOB%EVP_type)) IOB%EVP_type = EVPT
+    IOB%IceDS2d%ice_cover(:,:) = IceMerged%ice_cover(is:ie,js:je)
     IOB%IceDS2d%mi_sum(:,:) = IceMerged%mi_sum(is:ie,js:je)
     IOB%IceDS2d%u_ice_C(:,:) = IceMerged%u_ice_C(is:ie,js:je)
     IOB%IceDS2d%v_ice_C(:,:) = IceMerged%v_ice_C(is:ie,js:je)

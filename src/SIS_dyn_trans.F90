@@ -867,6 +867,8 @@ subroutine convert_IST_to_simple_state(IST, DS2d, CAS, G, US, IG, CS)
     enddo ; enddo
   endif
 
+  call hchksum(DS2d%ice_cover, "ice_cover in convert_IST_to_simple_state", G%HI)
+
   !  Determine the whole-cell averaged mass of snow and ice.
   call ice_state_to_cell_ave_state(IST, G, US, IG, CS%SIS_transport_CSp, CAS)
 
