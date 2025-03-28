@@ -550,6 +550,7 @@ subroutine direct_flux_ocn_to_OIB(Time, Ocean, OIB, Ice, do_thermo, do_dynmer)
     isB = Ocean%seaice%sG%isdB ; ieB = Ocean%seaice%sG%iedB 
     jsB = Ocean%seaice%sG%jsdB ; jeB = Ocean%seaice%sG%jedB 
 
+    DS2d%ice_cover(:,:) = Ocean%seaice%ice_cover(is:ie,js:je)
     DS2d%mi_sum(:,:) = Ocean%seaice%mi_sum(is:ie,js:je)
     DS2d%u_ice_C(:,:) = Ocean%seaice%u_ice_C(isB:ieB,js:je)
     DS2d%v_ice_C(:,:) = Ocean%seaice%v_ice_C(is:ie,jsB:jeB)
