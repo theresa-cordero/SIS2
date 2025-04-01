@@ -424,6 +424,7 @@ subroutine direct_flux_ice_to_IOB(Time, Ice, IOB, do_thermo, do_dynmer, IceMerge
     IOB%IceDS2d%v_ice_C(:,:) = IceMerged%v_ice_C(is:ie,js:je)
     IOB%IceDS2d%uh_step(:,:,:) = IceMerged%uh_step(is:ie,js:je,:)
     IOB%IceDS2d%vh_step(:,:,:) = IceMerged%vh_step(is:ie,js:je,:)
+    IOB%IceDS2d%nts = IceMerged%nts
 
     IOB%IceDS2d%FIA_2d%ice_cover(:,:) = IceMerged%FIA_2d%ice_cover(is:ie,js:je)
     IOB%IceDS2d%FIA_2d%ice_free(:,:) = IceMerged%FIA_2d%ice_free(is:ie,js:je)
@@ -556,6 +557,7 @@ subroutine direct_flux_ocn_to_OIB(Time, Ocean, OIB, Ice, do_thermo, do_dynmer)
     DS2d%v_ice_C(:,:) = Ocean%seaice%v_ice_C(is:ie,jsB:jeB)
     DS2d%uh_step(:,:,1) = Ocean%seaice%uh_step(isB:ieB,js:je,1)
     DS2d%vh_step(:,:,1) = Ocean%seaice%vh_step(is:ie,jsB:jeB,1)
+    DS2d%nts = 1 !Ocean%seaice%nts
 
     DS2d%FIA_2d%ice_cover(:,:) = Ocean%seaice%FIA_2d%ice_cover(is:ie,js:je)
     DS2d%FIA_2d%ice_free(:,:) = Ocean%seaice%FIA_2d%ice_free(is:ie,js:je)
@@ -603,6 +605,8 @@ subroutine direct_flux_ocn_to_OIB(Time, Ocean, OIB, Ice, do_thermo, do_dynmer)
                                 Ice%sCS%specified_ice, Ice%ocean_fields)
 
   call translate_OSS_to_sOSS(Ice%sCS%OSS, Ice%sCS%IST, Ice%sCS%sOSS, Ice%sCS%G, Ice%sCS%US)
+
+  Ice%sCS%dyn_trans_CSp%DS2d = DS2d
 
 end subroutine direct_flux_ocn_to_OIB
 
