@@ -400,6 +400,7 @@ subroutine direct_flux_ice_to_IOB(Time, Ice, IOB, do_thermo, do_dynmer, IceMerge
   type(SIS_dyn_state_2d),  optional, intent(in) :: IceMerged
 
   integer :: i, j, is, ie, js, je, i_off, j_off, n, m
+  integer :: isb, ieb, jsb, jeb
   logical :: used, do_therm, do_dynmerge
 
   call cpu_clock_begin(fluxIceOceanClock)
@@ -416,6 +417,8 @@ subroutine direct_flux_ice_to_IOB(Time, Ice, IOB, do_thermo, do_dynmer, IceMerge
 
     is = IceMerged%sG%isc ; ie = IceMerged%sG%iec 
     js = IceMerged%sG%jsc ; je = IceMerged%sG%jec 
+    isB = IceMerged%sG%iscB ; ieB = IceMerged%sG%iecB
+    jsB = IceMerged%sG%jscB ; jeB = IceMerged%sG%jecB
 
     !if (ASSOCIATED(IOB%EVP_type)) IOB%EVP_type = EVPT
     IOB%IceDS2d%ice_cover(:,:) = IceMerged%ice_cover(is:ie,js:je)
@@ -428,6 +431,7 @@ subroutine direct_flux_ice_to_IOB(Time, Ice, IOB, do_thermo, do_dynmer, IceMerge
 
     IOB%IceDS2d%FIA_2d%ice_cover(:,:) = IceMerged%FIA_2d%ice_cover(is:ie,js:je)
     IOB%IceDS2d%FIA_2d%ice_free(:,:) = IceMerged%FIA_2d%ice_free(is:ie,js:je)
+
     IOB%IceDS2d%FIA_2d%WindStr_x(:,:) = IceMerged%FIA_2d%WindStr_x(is:ie,js:je)
     IOB%IceDS2d%FIA_2d%WindStr_y(:,:) = IceMerged%FIA_2d%WindStr_y(is:ie,js:je)
     IOB%IceDS2d%FIA_2d%WindStr_ocn_x(:,:) = IceMerged%FIA_2d%WindStr_ocn_x(is:ie,js:je)

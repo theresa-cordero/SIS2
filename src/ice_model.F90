@@ -286,6 +286,7 @@ subroutine update_ice_merged_state(Ice, DS2d, sG)
     str_y_ice_ocn_Cv   ! Zonal ice-ocean stress on C-grid u-points [R Z L T-2 ~> Pa].
   real :: I_count
   integer :: i, j, k, isc, iec, jsc, jec
+  integer :: iscB, iecB, jscB, jecB
   integer :: i2, j2, i_off, j_off, ind
 
   !IG => Ice%sCS%IG ; sG => Ice%sCS%G ; US => Ice%sCS%US
@@ -293,6 +294,7 @@ subroutine update_ice_merged_state(Ice, DS2d, sG)
   sIST => Ice%sCS%IST ; FIA => Ice%sCS%FIA
   CS => Ice%sCS%dyn_trans_CSp
   isc = sG%isc ; iec = sG%iec ; jsc = sG%jsc ; jec = sG%jec
+  iscB= sG%iscB; iecB= sG%iecB; jscB= sG%jscB; jecB= sG%jecB
 
   ! Do halo updates on the forcing fields, as necessary.  This must occur before
   ! the call to SIS_dynamics_trans, because update_icebergs does its own halo
@@ -331,7 +333,11 @@ subroutine update_ice_merged_state(Ice, DS2d, sG)
     CS%DS2d%FIA_2d%ice_free(i,j) = FIA%ice_free(i,j)
     CS%DS2d%FIA_2d%WindStr_x(i,j) = FIA%WindStr_x(i,j)
     CS%DS2d%FIA_2d%WindStr_y(i,j) = FIA%WindStr_y(i,j)
+  enddo ; enddo
+  do j=jsc,jec ; do i=iscB,iecB
     CS%DS2d%FIA_2d%WindStr_ocn_x(i,j) = FIA%WindStr_ocn_x(i,j)
+  enddo ; enddo
+  do j=jscB,jecB ; do i=isc,iec
     CS%DS2d%FIA_2d%WindStr_ocn_y(i,j) = FIA%WindStr_ocn_y(i,j)
   enddo ; enddo
 
@@ -345,26 +351,30 @@ subroutine update_ice_merged_state(Ice, DS2d, sG)
   CS%DS2d%dynmer_trans_CSp%cover_trans_CSp = CS%cover_trans_CSp
 
   Ice%sCS%dyn_trans_CSp%DS2d = CS%DS2d
+  
+  ! What if I leave all ice-ocean stress calcs to MOM6?
+  !call set_wind_stresses_C(CS%DS2d%FIA_2d, CS%DS2d%FIA_2d%ice_cover, CS%DS2d%FIA_2d%ice_free, WindStr_x_Cu, WindStr_y_Cv, &
+  !                         WindStr_x_ocn_Cu, WindStr_y_ocn_Cv, sG, US, CS%complete_ice_cover) !, OBC)
+  !str_x_ice_ocn_Cu(:,:) = 0.0 
+  !str_y_ice_ocn_Cv(:,:) = 0.0
+  !call set_ocean_top_stress_C2(Ice%sCS%IOF, WindStr_x_ocn_Cu, WindStr_y_ocn_Cv, &
+  !                             str_x_ice_ocn_Cu, str_y_ice_ocn_Cv, CS%DS2d%FIA_2d%ice_free, CS%DS2d%FIA_2d%ice_cover, sG, US, Ice%OBC)
+  !!call set_ocean_top_dyn_fluxes(Ice, Ice%sCS%IOF, DS2d%FIA_2d, G, US, Ice%sCS)
 
-  call set_wind_stresses_C(CS%DS2d%FIA_2d, CS%DS2d%FIA_2d%ice_cover, CS%DS2d%FIA_2d%ice_free, WindStr_x_Cu, WindStr_y_Cv, &
-                           WindStr_x_ocn_Cu, WindStr_y_ocn_Cv, sG, US, CS%complete_ice_cover) !, OBC)
-  str_x_ice_ocn_Cu(:,:) = 0.0 
-  str_y_ice_ocn_Cv(:,:) = 0.0
-  call set_ocean_top_stress_C2(Ice%sCS%IOF, WindStr_x_ocn_Cu, WindStr_y_ocn_Cv, &
-                               str_x_ice_ocn_Cu, str_y_ice_ocn_Cv, CS%DS2d%FIA_2d%ice_free, CS%DS2d%FIA_2d%ice_cover, sG, US, Ice%OBC)
-  !call set_ocean_top_dyn_fluxes(Ice, Ice%sCS%IOF, DS2d%FIA_2d, G, US, Ice%sCS)
+  !! note that flux_[uv]_ocn is allocated as if on an A grid (always)
+  !i_off = LBOUND(Ice%flux_t,1) - sG%isc ; j_off = LBOUND(Ice%flux_t,2) - sG%jsc
+  !!$OMP parallel do default(shared) private(i2,j2)
+  !do j=jsc,jec ; do i=isc,iec
+  !  i2 = i+i_off ; j2 = j+j_off! Use these to correct for indexing differences.
+  !  Ice%flux_u(i2,j2) = US%RZ_T_to_kg_m2s*US%L_T_to_m_s*Ice%sCS%IOF%flux_u_ocn(i,j)
+  !  Ice%flux_v(i2,j2) = US%RZ_T_to_kg_m2s*US%L_T_to_m_s*Ice%sCS%IOF%flux_v_ocn(i,j)
+  !enddo ; enddo
+  !! This serves to fill in the symmetric-edge stress points
+  !!if ((Ice%flux_uv_stagger == BGRID_NE) .or. (Ice%flux_uv_stagger == CGRID_NE)) &
+  !!call pass_vector(Ice%flux_u, Ice%flux_v, sG%Domain_aux, stagger=Ice%flux_uv_stagger) ! Breaks gnu:, halo=1)
 
-  i_off = LBOUND(Ice%flux_t,1) - sG%isc ; j_off = LBOUND(Ice%flux_t,2) - sG%jsc
-  !$OMP parallel do default(shared) private(i2,j2)
-  do j=jsc,jec ; do i=isc,iec
-    i2 = i+i_off ; j2 = j+j_off! Use these to correct for indexing differences.
-    Ice%flux_u(i2,j2) = US%RZ_T_to_kg_m2s*US%L_T_to_m_s*Ice%sCS%IOF%flux_u_ocn(i,j)
-    Ice%flux_v(i2,j2) = US%RZ_T_to_kg_m2s*US%L_T_to_m_s*Ice%sCS%IOF%flux_v_ocn(i,j)
-  enddo ; enddo
-
-  !Ice%flux_u(:,:) =
-  !Ice%flux_v(:,:) =
-
+  call IOF_chksum("End update_ice_merged_state", Ice%sCS%IOF, sG, US, mech_fluxes=.true.)
+  call Ice_public_type_chksum("End update_ice_merged_state", Ice, check_slow=.true.)
 
 end subroutine update_ice_merged_state
 
