@@ -2489,10 +2489,14 @@ subroutine SIS_dyn_trans_init(Time, G, US, IG, param_file, diag, CS, output_dir,
       if (.not.associated(CS%DS2d%FIA_2d)) allocate(CS%DS2d%FIA_2d)
       call safe_alloc(CS%DS2d%FIA_2d%ice_cover, G%Isd, G%Ied, G%jsd, G%jed)
       call safe_alloc(CS%DS2d%FIA_2d%ice_free,  G%Isd, G%Ied, G%jsd, G%jed)
-      call safe_alloc(CS%DS2d%FIA_2d%WindStr_x, G%IsdB, G%IedB, G%jsd, G%jed)
-      call safe_alloc(CS%DS2d%FIA_2d%WindStr_y, G%isd, G%ied, G%JsdB, G%JedB)
-      call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_x, G%IsdB, G%IedB, G%jsd, G%jed)
-      call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_y, G%isd, G%ied, G%JsdB, G%JedB)
+      ! call safe_alloc(CS%DS2d%FIA_2d%WindStr_x, G%IsdB, G%IedB, G%jsd, G%jed) ! tjc 4-17-2025
+      ! call safe_alloc(CS%DS2d%FIA_2d%WindStr_y, G%isd, G%ied, G%JsdB, G%JedB)
+      ! call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_x, G%IsdB, G%IedB, G%jsd, G%jed)
+      ! call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_y, G%isd, G%ied, G%JsdB, G%JedB)
+      call safe_alloc(CS%DS2d%FIA_2d%WindStr_x, G%Isd, G%Ied, G%jsd, G%jed)
+      call safe_alloc(CS%DS2d%FIA_2d%WindStr_y, G%isd, G%ied, G%Jsd, G%Jed)
+      call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_x, G%Isd, G%Ied, G%jsd, G%jed)
+      call safe_alloc(CS%DS2d%FIA_2d%WindStr_ocn_y, G%isd, G%ied, G%Jsd, G%Jed)
       if (.not.associated(CS%DS2d%dynmer_trans_CSp)) allocate(CS%DS2d%dynmer_trans_CSp)
       CS%DS2d%dynmer_trans_CSp%debug = CS%debug 
       CS%DS2d%dynmer_trans_CSp%do_ridging = CS%do_ridging
