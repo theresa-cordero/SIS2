@@ -474,7 +474,7 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
   integer :: nid, njd, isdG, iedG, jsdG, jedG
   integer, dimension(4) :: fld_sz
   integer :: thickest_with_ice, num_nonzero_cats
-  real :: net_conc, conc_ref, conc_adjust, frac_adjust, error_adjust
+  real :: net_conc, Inet_conc, conc_ref, conc_adjust, frac_adjust, error_adjust
   real :: diff_adjust
   integer, dimension(1:IG%CatIce) :: nonzero_conc
 
@@ -520,41 +520,22 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
     do col=1,CS%num_col
       i = CS%col_i(col) ; j = CS%col_j(col)
       damp = dt * CS%Iresttime_col(col); I1pdamp = 1.0 / (1.0 + damp)
-      thickest_with_ice = 0;  net_conc = 0.0; nonzero_conc(:) = 0
-      do k=IG%CatIce,1,-1 ! start with thickest category
+      net_conc= sum(CS%var(2)%p(i,j,:))
+      Inet_conc = 0. ; if (net_conc>0) Inet_conc=1/net_conc
+      !conc_ref = sum(CS%Ref_val(2)%p(col,:))
+      conc_ref = data_in(i,j)
+      if (i == CS%itest .and. j == CS%jtest) then
+        write(mesg, '("Before: conc_ref= ",D12.4," net_conc= ",D12.4," rescale= ",D12.4)') &
+        conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
+        write(*,'(A)') trim(mesg)
+      endif
+      do k=1,IG%CatIce
         CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
-        if (i == CS%itest .and. j == CS%jtest) then
-          write(mesg, '("checking thickest: k = ",I2," conc(k)= ",D12.4)') &
-          k, CS%var(2)%p(i,j,k) 
-          write(*,'(A)') trim(mesg)
-        endif
-        if (CS%var(2)%p(i,j,k) > 0) then
-          if (thickest_with_ice==0) thickest_with_ice = k
-          nonzero_conc(k) = 1
-          net_conc = net_conc + CS%var(2)%p(i,j,k)
-        endif 
-      enddo
-      conc_ref = sum(CS%Ref_val(2)%p(col,:))
-      conc_adjust = I1pdamp*(net_conc + conc_ref*damp)
-      if (thickest_with_ice==0) then
-        frac_adjust = 0.0
-      else
-        diff_adjust = (conc_adjust - net_conc)
-        if (diff_adjust<0) then
-          num_nonzero_cats = sum(nonzero_conc)
-          frac_adjust = diff_adjust/num_nonzero_cats
-        else 
-          frac_adjust = diff_adjust/thickest_with_ice
-        endif
-      endif 
-      ! add ice to each category up to the thickest that already had ice
-      do k=1,thickest_with_ice
-        if (frac_adjust<0 .and. CS%var(2)%p(i,j,k)>0) then
-          CS%var(2)%p(i,j,k) = CS%var(2)%p(i,j,k) + frac_adjust 
-        elseif (frac_adjust>0) then   
-          CS%var(2)%p(i,j,k) = CS%var(2)%p(i,j,k) + frac_adjust 
-        endif
+        CS%var(2)%p(i,j,k)=CS%var(2)%p(i,j,k)*I1pdamp*(1+conc_ref*Inet_conc*damp) 
         if (CS%var(2)%p(i,j,k)>1) then
+          write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+          i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+          write(*,'(A)') trim(mesg)
           call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
         endif 
         if (CS%var(2)%p(i,j,k)<0) then
@@ -597,39 +578,40 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
         !write(*,'(A)') trim(mesg)
       endif 
       !!! This can be removed TJC !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-      do k=1,IG%CatIce
-        ! If there is ice concentration, but no thickness, 
-        ! it means new ice has been created in that category. 
-        !if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
-        if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
-          if (i == CS%itest .and. j == CS%jtest) then
-            write(mesg, '("kt= ",I2," conc= ",D12.4," old_thickness= ",D12.4)') &
-            k, CS%var(2)%p(i,j,k), CS%var(1)%p(i,j,k) 
-            write(*,'(A)') trim(mesg)
-          endif
-          CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
-          ! Adjust enth and S in the newly formed ice if needed:
-          ! Note ice enthalpy < 0
-          do l=1,NkIce
-            if (IST%sal_ice(i,j,k,l) < s_ice_bulk) IST%sal_ice(i,j,k,l) = s_ice_bulk
-            sice(l) = IST%sal_ice(i,j,k,l)
-          enddo
-          ! Enth should be at least enth(T_freez)
-          ! Make ice T below T frz and/or keep at ocean SST if it is < ice Tfrz
-          ! to prevent rapid ice melt in the relaxation zone
-          call calculate_T_Freeze(sice, tfi, IST%ITV)
-          tfi = min(tfi-0.1*US%degC_to_C, OSS%SST_C(i,j)*US%degC_to_C)
+      ! With the rescale method, no new ice is created
+      !do k=1,IG%CatIce
+      !  ! If there is ice concentration, but no thickness, 
+      !  ! it means new ice has been created in that category. 
+      !  !if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
+      !  if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
+      !    if (i == CS%itest .and. j == CS%jtest) then
+      !      write(mesg, '("kt= ",I2," conc= ",D12.4," old_thickness= ",D12.4)') &
+      !      k, CS%var(2)%p(i,j,k), CS%var(1)%p(i,j,k) 
+      !      write(*,'(A)') trim(mesg)
+      !    endif
+      !    CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
+      !    ! Adjust enth and S in the newly formed ice if needed:
+      !    ! Note ice enthalpy < 0
+      !    do l=1,NkIce
+      !      if (IST%sal_ice(i,j,k,l) < s_ice_bulk) IST%sal_ice(i,j,k,l) = s_ice_bulk
+      !      sice(l) = IST%sal_ice(i,j,k,l)
+      !    enddo
+      !    ! Enth should be at least enth(T_freez)
+      !    ! Make ice T below T frz and/or keep at ocean SST if it is < ice Tfrz
+      !    ! to prevent rapid ice melt in the relaxation zone
+      !    call calculate_T_Freeze(sice, tfi, IST%ITV)
+      !    tfi = min(tfi-0.1*US%degC_to_C, OSS%SST_C(i,j)*US%degC_to_C)
 
-          do l=1,NkIce
-            enth_ice = IST%enth_ice(i,j,k,l)
-            enth_Tfrz = enth_from_TS(tfi(l), sice(l), IST%ITV)
+      !    do l=1,NkIce
+      !      enth_ice = IST%enth_ice(i,j,k,l)
+      !      enth_Tfrz = enth_from_TS(tfi(l), sice(l), IST%ITV)
 
-            if (enth_ice > enth_Tfrz) then
-              IST%enth_ice(i,j,k,l) = enth_Tfrz
-            endif
-          enddo
-        endif ! if ice has been added to this cateory
-      enddo  ! CatIce
+      !      if (enth_ice > enth_Tfrz) then
+      !        IST%enth_ice(i,j,k,l) = enth_Tfrz
+      !      endif
+      !    enddo
+      !  endif ! if ice has been added to this cateory
+      !enddo  ! CatIce
 
       ! Adjust open water partial area:
       do m=1,CS%fldno
@@ -650,8 +632,8 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
 
       !!! test point block !!!
       if (i == CS%itest .and. j == CS%jtest) then
-        write(mesg, '("k_thickest= ",I2," net_conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-        thickest_with_ice, net_conc, conc_adjust, frac_adjust, error_adjust 
+        write(mesg, '("After: conc_ref= ",D12.4," fianl net_conc= ",D12.4," rescale= ",D12.4)') &
+        conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
         write(*,'(A)') trim(mesg)
       endif
       do k=1,IG%CatIce
