@@ -74,7 +74,6 @@ end type f3d
 !> This control structure holds memory and parameters for the SIS_sponge module
 type, public :: isponge_CS ; private
   logical, public :: use_isponge = .false.  !< If true, ice tracer fields may be relaxed somewhere in the domain
-  integer, public :: itest, jtest    !< Test point where diagnostics are printed out for checking the relaxation
   integer         :: num_col         !< The number of relaxation points within the computational domain.
   integer, public :: fldno = 0       !< The number of fields which have already been
                                      !! registered by calls to set_up_isponge_field
@@ -120,7 +119,6 @@ subroutine initialize_icerelax_file(param_file, G, IG, CS, US, IST, Time)
   integer :: i, j, k, is, ie, js, je, ncat
   integer :: isd, ied, jsd, jed
   integer :: isc, iec, jsc, jec
-  integer :: itestG, jtestG, itest, jtest  ! Test point indices global and local
   integer :: year     !< The current model year
   integer :: day      !< The current model year-day
   integer :: second   !< The second of the day
@@ -140,7 +138,7 @@ subroutine initialize_icerelax_file(param_file, G, IG, CS, US, IST, Time)
   isc = G%isc ; iec = G%iec ; jsc = G%jsc ; jec = G%jec ; ncat = IG%CatIce
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
 
-  Irelax = 0.0 ; itestG = 0 ; jtestG = 0 ; itest = 0 ; jtest = 0
+  Irelax = 0.0 ; 
 
   verbosity = MOM_get_verbosity()
 
@@ -166,10 +164,6 @@ subroutine initialize_icerelax_file(param_file, G, IG, CS, US, IST, Time)
   call get_param(param_file, mdl, "ISPONGE_RLXRATE_VAR", rlxrate_var, &
                  "The name of the relaxation rate variable in "//&
                  "ISPONGE_RELAX_FILE.", default="relax_rate")
-  call get_param(param_file, mdl, "ISPONGE_ITEST", itestG, &
-                 "I index of a test point to check ice relaxation dumped to log file")
-  call get_param(param_file, mdl, "ISPONGE_JTEST", jtestG, &
-                 "J index of a test point to check ice relaxation dumped to log file")
 
   ! Read in relaxation rate, s-1, for ice thickness and partial area
   filename = trim(inputdir)//trim(relaxrate_file)
@@ -189,15 +183,7 @@ subroutine initialize_icerelax_file(param_file, G, IG, CS, US, IST, Time)
     call SIS_mesg(mesg, verb_msg) 
   endif
 
-  !call initialize_isponge(param_file, Irelax, G, IG, CS)
-  if (itestG > 0 .and. jtestG > 0) &
-    call global_to_local_ij(G, itestG, jtestG, itest, jtest)
-
-  if (itest > 0 .and. jtest > 0) then
-    call initialize_isponge(param_file, Irelax, G, IG, CS, itest=itest, jtest=jtest)
-  else
-    call initialize_isponge(param_file, Irelax, G, IG, CS)
-  endif
+  call initialize_isponge(param_file, Irelax, G, IG, CS)
 
   ! Now register all of the fields which are nudged in the relaxation region.
   filename = trim(inputdir)//trim(state_file)
@@ -220,7 +206,7 @@ end subroutine initialize_icerelax_file
 !! Iresttime and which mask2dT indicates are ocean points are included as the
 !! relaxation points.  
 !! subroutine initialize_isponge(param_file, Iresttime, G, IG, CS, time_var_rlx, sponge_ongrid)
-subroutine initialize_isponge(param_file, Iresttime, G, IG, CS, itest, jtest, time_var_rlx, sponge_ongrid)
+subroutine initialize_isponge(param_file, Iresttime, G, IG, CS, time_var_rlx, sponge_ongrid)
   type(SIS_hor_grid_type), intent(in) :: G          !< The horizontal grid type
   type(param_file_type),   intent(in) :: param_file !< A structure to parse for run-time parameters
   type(ice_grid_type),     intent(in) :: IG         !< The sea-ice specific grid type
@@ -228,7 +214,6 @@ subroutine initialize_isponge(param_file, Iresttime, G, IG, CS, itest, jtest, ti
                            intent(in) :: Iresttime  !< The inverse of the restoring time [T-1 ~> s-1].
   type(isponge_CS),        pointer    :: CS         !< A pointer to the SIS_isponge control structure
                                                     !! for this module
-  integer, optional, intent(in) :: itest, jtest     !< test grid indices for debugging
   logical, optional, intent(in) :: time_var_rlx, sponge_ongrid !< place-holders, currently both true
 
   ! This include declares and sets the variable "version".
@@ -271,18 +256,6 @@ subroutine initialize_isponge(param_file, Iresttime, G, IG, CS, itest, jtest, ti
   if (present(sponge_ongrid)) CS%spongeDataOngrid = sponge_ongrid
 
   CS%use_isponge = use_isponge
-  if (present(itest) .and. present(jtest)) then
-    write(mesg,'(A," itest/jtest =",2(i5,1x))') trim(mdl), itest, jtest
-    write(*,'(A)') trim(mesg)
-    CS%itest = itest
-    CS%jtest = jtest
-  else
-    ! No test point specified in SIS_input
-    CS%itest = -1
-    CS%jtest = -1
-  endif
-
-  !CS%use_isponge = use_isponge
 
   CS%num_col = 0 ; CS%fldno = 0
   do j=G%jsc,G%jec ; do i=G%isc,G%iec
@@ -500,22 +473,7 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
   allocate(sice(NkIce), tfi(NkIce), source=-999.)
 
   if (CS%concentration_only==.true.) then
-    ! fldno == 2 is part_size
     call time_interp_external(CS%Ref_val(2)%field, Time, data_in, verbose=.true.)
-    !!! test point block !!!
-    ! Information about the test point:
-    if (CS%itest > 0 .and. CS%jtest > 0) then
-      do col=1,CS%num_col
-        i = CS%col_i(col) ; j = CS%col_j(col)
-        if (CS%itest == i .and. CS%jtest == j) then
-          iiG = isdG + (i-1)  ; jjG = jsdG + (j-1)
-          write(mesg,'("apply_isponge: test i/j=",2(i0,1x),(1x,A)," time_iterp data_in=",f12.7)') &
-          iiG, jjG, trim(CS%var(2)%fld_name),data_in(i,j)
-          write(*,'(A)') trim(mesg)
-        endif
-      enddo
-    endif
-    !!! test point block !!!
     CS%Ref_orig(2)%fld(:,:) = data_in(:,:)
     do col=1,CS%num_col
       i = CS%col_i(col) ; j = CS%col_j(col)
@@ -524,93 +482,50 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
       conc_ref = data_in(i,j)
       if (net_conc > conc_ref) then ! if the model concentration is greater than the target, rescale.
         Inet_conc = 0. ; if (net_conc>0) Inet_conc=1/net_conc
-        if (i == CS%itest .and. j == CS%jtest) then
-          write(mesg, '("Before: conc_ref= ",D12.4," net_conc= ",D12.4," rescale= ",D12.4)') &
-          conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
-          write(*,'(A)') trim(mesg)
-        endif
         do k=1,IG%CatIce
           CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
           CS%var(2)%p(i,j,k)=CS%var(2)%p(i,j,k)*I1pdamp*(1+conc_ref*Inet_conc*damp) 
-          if (CS%var(2)%p(i,j,k)>1) then
-            write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-            i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
-            write(*,'(A)') trim(mesg)
-            call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
-          endif 
-          if (CS%var(2)%p(i,j,k)<0) then
-            write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-            i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
-            write(*,'(A)') trim(mesg)
-            call SIS_error(FATAL, 'After adding frac_adjust, ice in category is less than zero.')
-          endif 
+          !if (CS%var(2)%p(i,j,k)>1) then
+          !  write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+          !  i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+          !  write(*,'(A)') trim(mesg)
+          !  call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
+          !endif 
+          !if (CS%var(2)%p(i,j,k)<0) then
+          !  write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+          !  i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+          !  write(*,'(A)') trim(mesg)
+          !  call SIS_error(FATAL, 'After adding frac_adjust, ice in category is less than zero.')
+          !endif 
         enddo
-        !!! test point block !!!
-        do k=1,IG%CatIce
-          ! Diagnostics at the test point if it is specified in SIS_input
-          if (i == CS%itest .and. j == CS%jtest) then
-            select case (trim(CS%var(2)%fld_name))
-              case('mH_ice')    ; coeff = US%RZ_to_kg_m2
-              case('part_size') ; coeff = 1.0
-              case default
-                write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
-                call SIS_error(FATAL,"apply_isponge: "//mesg)
-            end select
-            write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
-                 " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
-              CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
-              CS%var(2)%p(i,j,k)*coeff, &
-              CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, coeff
-            write(*,'(A)') trim(mesg)
-          endif
-        enddo
-        !!! test point block !!!
       else ! if modle concentration is less than target  
         thickest_with_ice = 0; !  net_conc = 0.0; nonzero_conc(:) = 0
         do k=IG%CatIce,1,-1 ! start with thickest category
           CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
-          if (i == CS%itest .and. j == CS%jtest) then
-            write(mesg, '("checking thickest: k = ",I2," conc(k)= ",D12.4)') &
-            k, CS%var(2)%p(i,j,k) 
-            write(*,'(A)') trim(mesg)
-          endif 
-         if (CS%var(2)%p(i,j,k) > 0) then
-            if (thickest_with_ice==0) thickest_with_ice = k
-        !    nonzero_conc(k) = 1
-        !    net_conc = net_conc + CS%var(2)%p(i,j,k)
-          endif 
+          if (CS%var(2)%p(i,j,k) > 0 .and. thickest_with_ice==0) thickest_with_ice = k
         enddo
-        !conc_ref = sum(CS%Ref_val(2)%p(col,:))
         conc_adjust = I1pdamp*(net_conc + conc_ref*damp)
         if (thickest_with_ice==0) then ! there is no ice in this grid cell
           frac_adjust = (conc_adjust - net_conc)
           CS%var(2)%p(i,j,1) = CS%var(2)%p(i,j,1) + frac_adjust 
         else
           frac_adjust = (conc_adjust - net_conc)/thickest_with_ice
-        endif 
-
-        if (thickest_with_ice>0) then
+        !endif ! I believe these these loops can be merged.
+        !if (thickest_with_ice>0) then
           do k=1,thickest_with_ice
             CS%var(2)%p(i,j,k) = CS%var(2)%p(i,j,k) + frac_adjust 
-            if (CS%var(2)%p(i,j,k)>1) then
-              write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-              i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
-              write(*,'(A)') trim(mesg)
-              call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
-            endif 
+            !if (CS%var(2)%p(i,j,k)>1) then
+            !  write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+            !  i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+            !  write(*,'(A)') trim(mesg)
+            !  call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
+            !endif 
           enddo
         endif 
         do k=1,IG%CatIce
           ! If there is ice concentration, but no thickness, 
           ! it means new ice has been created in that category. 
-          ! only problem is I am not sure I trust CS%var(1)
-          !if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
           if (IST%mH_ice(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
-            if (i == CS%itest .and. j == CS%jtest) then
-              write(mesg, '("kt= ",I2," conc= ",D12.4," old_thickness= ",D12.4)') &
-              k, CS%var(2)%p(i,j,k), CS%var(1)%p(i,j,k) 
-              write(*,'(A)') trim(mesg)
-            endif
             CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
             ! Adjust enth and S in the newly formed ice if needed:
             ! Note ice enthalpy < 0
@@ -653,57 +568,6 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
         enddo
       enddo
 
-      !!! test point block !!!
-      if (i == CS%itest .and. j == CS%jtest) then
-        write(mesg, '("After: conc_ref= ",D12.4," fianl net_conc= ",D12.4," rescale= ",D12.4)') &
-        conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
-        write(*,'(A)') trim(mesg)
-      endif
-      do k=1,IG%CatIce
-        ! Diagnostics at the test point if it is specified in SIS_input
-        if (i == CS%itest .and. j == CS%jtest) then
-          select case (trim(CS%var(1)%fld_name))
-            case('mH_ice')    ; coeff = US%RZ_to_kg_m2
-            case('part_size') ; coeff = 1.0
-            case default
-              write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(1)%fld_name)
-              call SIS_error(FATAL,"apply_isponge: "//mesg)
-          end select
-          write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
-               " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
-            CS%var(1)%fld_name(1:8), k, CS%Old_val(1)%fld(col,k)*coeff, &
-            CS%var(1)%p(i,j,k)*coeff, &
-            CS%Iresttime_col(col), CS%Ref_val(1)%p(col,k)*coeff, dt, coeff
-          write(*,'(A)') trim(mesg)
-        endif
-      enddo
-      !!! test point block !!!
-      !!! test point block !!!
-      ! Diagnostics at the test point
-      if (i == CS%itest .and. j == CS%jtest) then
-        iconc_tot = 0.0 ; iconc_tot_old = 0.0 ; ithk_tot_new = 0.0 ; ithk_tot_old = 0.0
-        do k=1,IG%CatIce
-          do m=1,CS%fldno
-            fld_name = CS%var(m)%fld_name
-            select case (trim(fld_name))
-              case('mH_ice')
-                ithk_old = CS%Old_val(m)%fld(col,k)/CS%Ref_val(m)%scale
-                ithk_new = CS%var(m)%p(i,j,k)/CS%Ref_val(m)%scale
-              case('part_size')
-                iconc_old = CS%Old_val(m)%fld(col,k)
-                iconc_new = CS%var(m)%p(i,j,k)
-            end select
-          enddo
-          iconc_tot_old = iconc_tot_old + iconc_old
-          iconc_tot    = iconc_tot + iconc_new
-          ithk_tot_old = ithk_tot_old + ithk_old*iconc_old
-          ithk_tot_new = ithk_tot_new + ithk_new*iconc_new
-        enddo
-        write(mesg, '("conc old=",f12.7," new=",f12.7," thick (m) old=",f12.7," new=",f12.7)') &
-              iconc_tot_old, iconc_tot, ithk_tot_old, ithk_tot_new
-        write(*,'(A)') trim(mesg)
-      endif
-      !!! test point block !!!
     enddo ! end do col 
   !endif
   else ! if doing both part size and thickness ...
