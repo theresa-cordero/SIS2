@@ -509,6 +509,8 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
         i = CS%col_i(col) ; j = CS%col_j(col)
         if (CS%itest == i .and. CS%jtest == j) then
           iiG = isdG + (i-1)  ; jjG = jsdG + (j-1)
+          write(mesg,'("SIS_sponge: using relaxation field: ",A)') trim(CS%var(2)%fld_name)
+          write(*,'(A)') trim(mesg)
           write(mesg,'("apply_isponge: test i/j=",2(i0,1x),(1x,A)," time_iterp data_in=",f12.7)') &
           iiG, jjG, trim(CS%var(2)%fld_name),data_in(i,j)
           write(*,'(A)') trim(mesg)
@@ -520,7 +522,7 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
     do col=1,CS%num_col
       i = CS%col_i(col) ; j = CS%col_j(col)
       damp = dt * CS%Iresttime_col(col); I1pdamp = 1.0 / (1.0 + damp)
-      net_conc= sum(CS%var(2)%p(i,j,:))
+      net_conc= sum(CS%var(2)%p(i,j,1:IG%CatIce))
       conc_ref = data_in(i,j)
       if (net_conc > conc_ref) then ! if the model concentration is greater than the target, rescale.
         Inet_conc = 0. ; if (net_conc>0) Inet_conc=1/net_conc
@@ -600,6 +602,26 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
             endif 
           enddo
         endif 
+        !!! test point block !!!
+        do k=1,IG%CatIce
+          ! Diagnostics at the test point if it is specified in SIS_input
+          if (i == CS%itest .and. j == CS%jtest) then
+            select case (trim(CS%var(2)%fld_name))
+              case('mH_ice')    ; coeff = US%RZ_to_kg_m2
+              case('part_size') ; coeff = 1.0
+              case default
+                write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
+                call SIS_error(FATAL,"apply_isponge: "//mesg)
+            end select
+            write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
+                 " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
+              CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
+              CS%var(2)%p(i,j,k)*coeff, &
+              CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, coeff
+            write(*,'(A)') trim(mesg)
+          endif
+        enddo
+        !!! test point block !!!
         do k=1,IG%CatIce
           ! If there is ice concentration, but no thickness, 
           ! it means new ice has been created in that category. 
@@ -612,29 +634,35 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
               write(*,'(A)') trim(mesg)
             endif
             CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
-            ! Adjust enth and S in the newly formed ice if needed:
-            ! Note ice enthalpy < 0
-            do l=1,NkIce
-              if (IST%sal_ice(i,j,k,l) < s_ice_bulk) IST%sal_ice(i,j,k,l) = s_ice_bulk
-              sice(l) = IST%sal_ice(i,j,k,l)
-            enddo
-            ! Enth should be at least enth(T_freez)
-            ! Make ice T below T frz and/or keep at ocean SST if it is < ice Tfrz
-            ! to prevent rapid ice melt in the relaxation zone
-            call calculate_T_Freeze(sice, tfi, IST%ITV)
-            tfi = min(tfi-0.1*US%degC_to_C, OSS%SST_C(i,j)*US%degC_to_C)
-
-            do l=1,NkIce
-              enth_ice = IST%enth_ice(i,j,k,l)
-              enth_Tfrz = enth_from_TS(tfi(l), sice(l), IST%ITV)
-
-              if (enth_ice > enth_Tfrz) then
-                IST%enth_ice(i,j,k,l) = enth_Tfrz
-              endif
-            enddo
           endif ! if ice has been added to this cateory
         enddo  ! CatIce
       endif ! if model>target scale, if model<target add.   
+
+      do k=1,IG%CatIce
+        ! Adjust enth and S in the newly formed ice if needed:
+        ! Note ice enthalpy < 0
+        do l=1,NkIce
+          if (IST%sal_ice(i,j,k,l) < s_ice_bulk) IST%sal_ice(i,j,k,l) = s_ice_bulk
+          sice(l) = IST%sal_ice(i,j,k,l)
+        enddo
+        ! Enth should be at least enth(T_freez)
+        ! Make ice T below T frz and/or keep at ocean SST if it is < ice Tfrz
+        ! to prevent rapid ice melt in the relaxation zone
+        call calculate_T_Freeze(sice, tfi, IST%ITV)
+        tfi = min(tfi-0.1*US%degC_to_C, OSS%SST_C(i,j)*US%degC_to_C)
+
+        do l=1,NkIce
+          enth_ice = IST%enth_ice(i,j,k,l)
+          enth_Tfrz = enth_from_TS(tfi(l), sice(l), IST%ITV)
+
+          if (enth_ice > enth_Tfrz) then
+            IST%enth_ice(i,j,k,l) = enth_Tfrz
+          endif
+        enddo
+      enddo  ! CatIce
+     !     endif ! if ice has been added to this cateory
+     !   enddo  ! CatIce
+     ! endif ! if model>target scale, if model<target add.   
 
       ! Adjust open water partial area:
       do m=1,CS%fldno
