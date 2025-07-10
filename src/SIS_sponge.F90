@@ -524,119 +524,135 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
       damp = dt * CS%Iresttime_col(col); I1pdamp = 1.0 / (1.0 + damp)
       net_conc= sum(CS%var(2)%p(i,j,1:IG%CatIce))
       conc_ref = data_in(i,j)
-      if (net_conc > conc_ref) then ! if the model concentration is greater than the target, rescale.
-        Inet_conc = 0. ; if (net_conc>0) Inet_conc=1/net_conc
-        if (i == CS%itest .and. j == CS%jtest) then
-          write(mesg, '("Before: conc_ref= ",D12.4," net_conc= ",D12.4," rescale= ",D12.4)') &
-          conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
-          write(*,'(A)') trim(mesg)
-        endif
-        do k=1,IG%CatIce
-          CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
-          CS%var(2)%p(i,j,k)=CS%var(2)%p(i,j,k)*I1pdamp*(1+conc_ref*Inet_conc*damp) 
-          if (CS%var(2)%p(i,j,k)>1) then
-            write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-            i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
-            write(*,'(A)') trim(mesg)
-            call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
-          endif 
-          if (CS%var(2)%p(i,j,k)<0) then
-            write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-            i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
-            write(*,'(A)') trim(mesg)
-            call SIS_error(FATAL, 'After adding frac_adjust, ice in category is less than zero.')
-          endif 
-        enddo
-        !!! test point block !!!
-        do k=1,IG%CatIce
-          ! Diagnostics at the test point if it is specified in SIS_input
+      if (i == CS%itest .and. j == CS%jtest) then
+        write(mesg, '("Before: conc_ref= ",D12.4," net_conc= ",D12.4," I1pdamp= ",D12.4)') &
+        conc_ref-1, net_conc-1, I1pdamp 
+        write(*,'(A)') trim(mesg)
+      endif
+      if (abs(net_conc - conc_ref) >= 1e-10) then ! if the current concentration and target concentration are close enough, there is no adjustment
+      !if (net_conc <= 1.0 .and. conc_ref <= 1.0) then ! if both the model and target concentration are good 
+        if (net_conc > conc_ref) then ! if the model concentration is greater than the target, rescale.
+          Inet_conc = 0. ; if (net_conc>0) Inet_conc=1/net_conc
           if (i == CS%itest .and. j == CS%jtest) then
-            select case (trim(CS%var(2)%fld_name))
-              case('mH_ice')    ; coeff = US%RZ_to_kg_m2
-              case('part_size') ; coeff = 1.0
-              case default
-                write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
-                call SIS_error(FATAL,"apply_isponge: "//mesg)
-            end select
-            write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
-                 " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
-              CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
-              CS%var(2)%p(i,j,k)*coeff, &
-              CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, coeff
+            write(mesg, '("Before: conc_ref= ",D12.4," net_conc= ",D12.4," rescale= ",D12.4)') &
+            conc_ref, net_conc, I1pdamp*(1+conc_ref*Inet_conc*damp) 
             write(*,'(A)') trim(mesg)
           endif
-        enddo
-        !!! test point block !!!
-      else ! if modle concentration is less than target  
-        thickest_with_ice = 0; !  net_conc = 0.0; nonzero_conc(:) = 0
-        do k=IG%CatIce,1,-1 ! start with thickest category
-          CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
-          if (i == CS%itest .and. j == CS%jtest) then
-            write(mesg, '("checking thickest: k = ",I2," conc(k)= ",D12.4)') &
-            k, CS%var(2)%p(i,j,k) 
-            write(*,'(A)') trim(mesg)
-          endif 
-         if (CS%var(2)%p(i,j,k) > 0) then
-            if (thickest_with_ice==0) thickest_with_ice = k
-        !    nonzero_conc(k) = 1
-        !    net_conc = net_conc + CS%var(2)%p(i,j,k)
-          endif 
-        enddo
-        !conc_ref = sum(CS%Ref_val(2)%p(col,:))
-        conc_adjust = I1pdamp*(net_conc + conc_ref*damp)
-        if (thickest_with_ice==0) then ! there is no ice in this grid cell
-          frac_adjust = (conc_adjust - net_conc)
-          CS%var(2)%p(i,j,1) = CS%var(2)%p(i,j,1) + frac_adjust 
-        else
-          frac_adjust = (conc_adjust - net_conc)/thickest_with_ice
-        endif 
-
-        if (thickest_with_ice>0) then
-          do k=1,thickest_with_ice
-            CS%var(2)%p(i,j,k) = CS%var(2)%p(i,j,k) + frac_adjust 
+          do k=1,IG%CatIce
+            CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
+            CS%var(2)%p(i,j,k)=CS%var(2)%p(i,j,k)*I1pdamp*(1+conc_ref*Inet_conc*damp) 
             if (CS%var(2)%p(i,j,k)>1) then
-              write(mesg, '("ERROR: i,j=",I2,I2," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
-              i,j,k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+              iiG = isdG + (i-1) ; jjG = jsdG + (j-1)
+              write(mesg, '("ERROR: i,j=",2(i4,1x)," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+              iiG, jjG, k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
               write(*,'(A)') trim(mesg)
               call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
             endif 
+            if (CS%var(2)%p(i,j,k)<0) then
+              iiG = isdG + (i-1) ; jjG = jsdG + (j-1)
+              write(mesg, '("ERROR: i,j=",2(i4,1x)," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+              iiG, jjG, k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+              write(*,'(A)') trim(mesg)
+              call SIS_error(FATAL, 'After adding frac_adjust, ice in category is less than zero.')
+            endif 
           enddo
-        endif 
-        !!! test point block !!!
-        do k=1,IG%CatIce
-          ! Diagnostics at the test point if it is specified in SIS_input
-          if (i == CS%itest .and. j == CS%jtest) then
-            select case (trim(CS%var(2)%fld_name))
-              case('mH_ice')    ; coeff = US%RZ_to_kg_m2
-              case('part_size') ; coeff = 1.0
-              case default
-                write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
-                call SIS_error(FATAL,"apply_isponge: "//mesg)
-            end select
-            write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
-                 " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
-              CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
-              CS%var(2)%p(i,j,k)*coeff, &
-              CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, coeff
-            write(*,'(A)') trim(mesg)
-          endif
-        enddo
-        !!! test point block !!!
-        do k=1,IG%CatIce
-          ! If there is ice concentration, but no thickness, 
-          ! it means new ice has been created in that category. 
-          ! only problem is I am not sure I trust CS%var(1)
-          !if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
-          if (IST%mH_ice(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
+          !!! test point block !!!
+          do k=1,IG%CatIce
+            ! Diagnostics at the test point if it is specified in SIS_input
             if (i == CS%itest .and. j == CS%jtest) then
-              write(mesg, '("kt= ",I2," conc= ",D12.4," old_thickness= ",D12.4)') &
-              k, CS%var(2)%p(i,j,k), CS%var(1)%p(i,j,k) 
+              select case (trim(CS%var(2)%fld_name))
+                case('mH_ice')    ; coeff = US%RZ_to_kg_m2
+                case('part_size') ; coeff = 1.0
+                case default
+                  write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
+                  call SIS_error(FATAL,"apply_isponge: "//mesg)
+              end select
+              write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
+                   " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
+                CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
+                CS%var(2)%p(i,j,k)*coeff, &
+                CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, coeff
               write(*,'(A)') trim(mesg)
             endif
-            CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
-          endif ! if ice has been added to this cateory
-        enddo  ! CatIce
-      endif ! if model>target scale, if model<target add.   
+          enddo
+          !!! test point block !!!
+        else ! if modle concentration is less than target  
+          thickest_with_ice = 0; !  net_conc = 0.0; nonzero_conc(:) = 0
+          do k=IG%CatIce,1,-1 ! start with thickest category
+            CS%Old_val(2)%fld(col,k) = CS%var(2)%p(i,j,k)  
+            if (i == CS%itest .and. j == CS%jtest) then
+              write(mesg, '("checking thickest: k = ",I2," conc(k)= ",D12.4)') &
+              k, CS%var(2)%p(i,j,k) 
+              write(*,'(A)') trim(mesg)
+            endif 
+           if (CS%var(2)%p(i,j,k) > 0) then
+              if (thickest_with_ice==0) thickest_with_ice = k
+          !    nonzero_conc(k) = 1
+          !    net_conc = net_conc + CS%var(2)%p(i,j,k)
+            endif 
+          enddo
+          !conc_ref = sum(CS%Ref_val(2)%p(col,:))
+          conc_adjust = I1pdamp*(net_conc + conc_ref*damp)
+          if (thickest_with_ice==0) then ! there is no ice in this grid cell
+            frac_adjust = (conc_adjust - net_conc)
+            CS%var(2)%p(i,j,1) = CS%var(2)%p(i,j,1) + frac_adjust 
+          else
+            frac_adjust = (conc_adjust - net_conc)/thickest_with_ice
+            if (i == CS%itest .and. j == CS%jtest) then
+              write(mesg, '("thickest_with_ice= ",I2," conc_adjust= ",D12.4," net_conc= ",D12.4," frac_adjust=",D12.4)') &
+              thickest_with_ice, conc_adjust-1, net_conc-1, frac_adjust
+              write(*,'(A)') trim(mesg)
+            endif 
+          endif 
+  
+          if (thickest_with_ice>0) then
+            do k=1,thickest_with_ice
+              CS%var(2)%p(i,j,k) = CS%var(2)%p(i,j,k) + frac_adjust 
+              if (CS%var(2)%p(i,j,k)>1) then
+                iiG = isdG + (i-1) ; jjG = jsdG + (j-1)
+                write(mesg, '("ERROR: i,j=",2(i4,1x)," k= ",I2," conc= ",D12.4," conc_adjust= ",D12.4," frac_adjust= ",D12.4," error_adjust= ",D12.4)') &
+                iiG, jjG, k, net_conc, CS%var(2)%p(i,j,k), frac_adjust, error_adjust 
+                write(*,'(A)') trim(mesg)
+                call SIS_error(FATAL, 'After adding frac_adjust, ice in category exceeds one.')
+              endif 
+            enddo
+          endif 
+          !!! test point block !!!
+          do k=1,IG%CatIce
+            ! Diagnostics at the test point if it is specified in SIS_input
+            if (i == CS%itest .and. j == CS%jtest) then
+              select case (trim(CS%var(2)%fld_name))
+                case('mH_ice')    ; coeff = US%RZ_to_kg_m2
+                case('part_size') ; coeff = 1.0
+                case default
+                  write(mesg,'("SIS_sponge: Unknown relaxation field: ",A)') trim(CS%var(2)%fld_name)
+                  call SIS_error(FATAL,"apply_isponge: "//mesg)
+              end select
+              write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
+                   " tau=",D12.4," refval=",D12.4," dt=",f7.1," frac_adjust=",E12.4)') &
+                CS%var(2)%fld_name(1:8), k, CS%Old_val(2)%fld(col,k)*coeff, &
+                CS%var(2)%p(i,j,k)*coeff, &
+                CS%Iresttime_col(col), CS%Ref_val(2)%p(col,k)*coeff, dt, frac_adjust
+              write(*,'(A)') trim(mesg)
+            endif
+          enddo
+          !!! test point block !!!
+          do k=1,thickest_with_ice ! IG%CatIce
+            ! If there is ice concentration, but no thickness, 
+            ! it means new ice has been created in that category. 
+            ! only problem is I am not sure I trust CS%var(1)
+            !if (CS%var(1)%p(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
+            if (IST%mH_ice(i,j,k)==0 .and. CS%var(2)%p(i,j,k)>0) then
+              if (i == CS%itest .and. j == CS%jtest) then
+                write(mesg, '("kt= ",I2," conc= ",D12.4," old_thickness= ",D12.4)') &
+                k, CS%var(2)%p(i,j,k), CS%var(1)%p(i,j,k) 
+                write(*,'(A)') trim(mesg)
+              endif
+              CS%var(1)%p(i,j,k)= IG%mH_cat_bound(k) ! set ice thickness to be the thinest possible in that category 
+            endif ! if ice has been added to this cateory
+          enddo  ! CatIce
+        endif ! if model>target scale, if model<target add.   
+      endif 
 
       do k=1,IG%CatIce
         ! Adjust enth and S in the newly formed ice if needed:
@@ -699,7 +715,7 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
           end select
           write(mesg,'(A8," k=",I2," old:=",D12.4," new=",D12.4,&
                " tau=",D12.4," refval=",D12.4," dt=",f7.1," coeff=",E12.4)') &
-            CS%var(1)%fld_name(1:8), k, CS%Old_val(1)%fld(col,k)*coeff, &
+            CS%var(1)%fld_name(1:8), k, IST%mH_ice(i,j,k)*coeff, &
             CS%var(1)%p(i,j,k)*coeff, &
             CS%Iresttime_col(col), CS%Ref_val(1)%p(col,k)*coeff, dt, coeff
           write(*,'(A)') trim(mesg)
@@ -728,7 +744,7 @@ subroutine apply_isponge(dt_slow, CS, G, IG, IST, US, OSS, Time)
           ithk_tot_new = ithk_tot_new + ithk_new*iconc_new
         enddo
         write(mesg, '("conc old=",f12.7," new=",f12.7," thick (m) old=",f12.7," new=",f12.7)') &
-              iconc_tot_old, iconc_tot, ithk_tot_old, ithk_tot_new
+              iconc_tot_old-1, iconc_tot-1, ithk_tot_old, ithk_tot_new
         write(*,'(A)') trim(mesg)
       endif
       !!! test point block !!!
